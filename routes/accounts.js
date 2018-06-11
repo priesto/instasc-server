@@ -1,30 +1,25 @@
 const express = require('express');
+const redis = require('redis');
 
 const { JWT_SECRET } = require('../config');
 const db = require('../utils/database');
-const init = require('../utils/insta/init');
 const aes = require('../utils/aes');
+const env = require('../utils/env');
 const post_delete = require('../utils/post_delete');
 
 const router = express.Router();
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
     let { uid } = req.token;
 
-    db.getConnection((err, connection) => {
-        if(err) {
-            console.error('could not get connection from pool.', err);
-            return res.status(500).send();
-        }
+    try {
+        const results = await db.query('SELECT aid, ig_username, ig_img, proxy, uid FROM accounts WHERE uid = ?', [uid]);
+        res.status(200).json(results);
+    } catch (error) {
+        env.isDev() && console.log(error);
+        return res.status(500).send();
+    }
 
-        connection.query('SELECT aid, ig_username, ig_img, proxy, uid FROM accounts WHERE uid = ?', [uid], (error, results, fields) => {
-            connection.release();
-            if(error) return res.status(500).json({msg: 'database error'});
-            res.status(200).json(results);
-
-        })
-
-    })
 });
 
 router.post('/', (req, res) => {
@@ -33,49 +28,63 @@ router.post('/', (req, res) => {
     if(!username || !password) return res.status(401).json({msg: 'some fields are missing'});
     if(!proxy) proxy = null;
 
-    init(username, password, proxy)
-        .then(data => {
+    const publisher = redis.createClient();
+    const subscriber = redis.createClient();
 
-            console.log('connected successfully');
-            db.getConnection((err, connection) => {
-                if(err) {
-                    console.error('could not get connection from pool.', err);
-                    return res.status(500).send();
-                }
+    const json = { username, password };
 
-                const cipher = aes.encrypt(password);
+    subscriber.on('message', async (channel, message) => {
+        if(message === '401' | message === '403') {
 
-                connection.query(`
-                    INSERT INTO accounts (aid, ig_username, ig_password, ig_img, ig_cookie, proxy, uid)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                    [data.id, username, cipher, data.picture, JSON.stringify(data.cookie), proxy, req.token.uid],
-                    (error, results, fields) => {
-                        if(error) {
-                            console.error('could not insert.', error);
-                            return res.status(500).json({msg: 'database error'});
-                        }
+            // An error occured during the connection or a session already exists.
+            publisher.quit();
+            subscriber.quit();
 
-                        connection.query(`
-                            SELECT aid, ig_username, ig_img, proxy, uid FROM accounts WHERE uid = ?`,
-                            [req.token.uid],
-                            (error, results, fields) => {
-                                connection.release();
-                                if(error) {
-                                    console.error('could not select.', error);
-                                    return res.status(500).json({msg: 'database error'});
-                                }
-                                res.status(200).json(results);
-                        })
+            return res.status(message).send();
+        }
 
-                    }
-                );
-            })
+        try {
 
-        }).catch(err => {
-            console.log('could not connect');
-            return res.status(500).json({msg: 'could not connect to your account with these credentials.'});
-        })
+            // Predis seems to escape some characters such as double quotes, and on top of that
+            // double quotes are added at the beginning and the end of the JSON string.
+            // So, for the moment we simply use `replace` and `slice` to delete those extra chars.
+            // TODO: Find a solution.
 
+            message = message.replace(/\\/g, '').slice(0, -1).slice(1);
+
+            const obj = JSON.parse(message);
+            const cipher = aes.encrypt(password);
+
+            await db.query(`
+                INSERT INTO accounts (aid, ig_username, ig_password, ig_img, proxy, uid)
+                VALUES (?, ?, ?, ?, ?, ?)`,
+                [obj.id, username, cipher, obj.img, proxy, req.token.uid]
+            );
+
+            const results = await db.query('SELECT aid, ig_username, ig_img, proxy, uid FROM accounts WHERE uid = ?', [req.token.uid]);
+
+            publisher.quit();
+            subscriber.quit();
+
+            return res.status(201).send(results);
+            
+        } catch (error) {
+            env.isDev() && console.log(error);
+            
+            publisher.quit();
+            subscriber.quit();
+
+            return res.status(500).send();
+        }
+
+    })
+    
+    subscriber.on('subscribe', (channel, count) => {
+        // Send data to PHP script after subscription to the response channel 
+        publisher.publish('request', JSON.stringify(json));
+    })
+    
+    subscriber.subscribe('response');
     
 })
 

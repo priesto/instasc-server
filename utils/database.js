@@ -1,6 +1,7 @@
-const mysql = require('mysql');
+const mysql = require('promise-mysql');
 
-const { MYSQL_USERNAME, MYSQL_PASSWORD, MYSQL_DATABASE } = require('../config');
+const env = process.env.NODE_ENV;
+const { MYSQL_USERNAME, MYSQL_PASSWORD, MYSQL_DATABASE } = require('../config')[env];
 
 const pool = mysql.createPool({
     connectionLimit: 10,

@@ -27,7 +27,6 @@ CREATE TABLE `accounts` (
   `ig_username` varchar(30) NOT NULL,
   `ig_password` varchar(75) NOT NULL,
   `ig_img` varchar(255) NOT NULL,
-  `ig_cookie` text,
   `proxy` varchar(75) DEFAULT NULL,
   `uid` int(11) NOT NULL,
   UNIQUE KEY `aid` (`aid`),

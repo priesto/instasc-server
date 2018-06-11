@@ -69,3 +69,9 @@ typings/
 
 # VSCode
 .vscode
+
+vendor
+
+dump.rdb
+
+redis-4.0.9
