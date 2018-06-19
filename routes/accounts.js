@@ -88,7 +88,7 @@ router.post('/', (req, res) => {
     
 })
 
-router.put('/', (req, res) => {
+router.put('/', async (req, res) => {
     const { newPassword, newProxy, aid } = req.body;
 
     if(!newPassword && !newProxy) return res.status(400).json({msg: 'some fields are missing'});
@@ -96,6 +96,8 @@ router.put('/', (req, res) => {
     // UPDATE `accounts` SET `ig_password` = 'dddd', `proxy` = 'ddd' WHERE `accounts`.`aid` = 5934622415
 
     let sql;
+
+    // TODO: Sanitize user input.
 
     if(newPassword) {
         const cipher = aes.encrypt(newPassword);
@@ -106,28 +108,21 @@ router.put('/', (req, res) => {
         sql = `UPDATE accounts SET proxy = '${newProxy}' WHERE aid = ${aid}`;
     }
 
-    db.getConnection((err, connection) => {
-        if(err) {
-            console.error('could not get connection from pool.', err);
-            return res.status(500).send();
-        }
 
-        connection.query(sql, (error, results, fields) => {
-            if(error) {
-                console.error('could not update.', error);
-                return res.status(500).json({msg: 'database error'});
-            }
+    try {
+    
+        await db.query(sql);
+        return res.status(200).send();
 
-            connection.release();
-            return res.status(200).send();
-        })
-    })
-
+    } catch (error) {
+        env.isDev() && console.log(error);
+        return res.status(500).send();
+    }
 
 })
 
 
-router.delete('/:aid', (req,res) => {
+router.delete('/:aid', async (req,res) => {
     // 1. Supprimer tous les posts appartenant à cette utilisateur.
     // 2. Supprimer ce compte.
 
@@ -138,46 +133,25 @@ router.delete('/:aid', (req,res) => {
     // Créer boucle et supprimer tous les posts en utilisant
     // 'delete endpoint' de la route users.
 
-    db.getConnection((err, connection) => {
-        if(err) {
-            console.error('could not get connection from pool.', err);
-            return res.status(500).send();
+    try {
+        
+        const results = await db.query('SELECT * FROM posts WHERE aid = ?', [aid]);
+
+        for (let index = 0; index < results.length; index++) {
+            try {
+                await post_delete(results[index].pid)
+                console.log('post successfully deleted');
+            } catch (e) {
+                console.log('unable to delete this post');
+                console.log(e);
+            }             
         }
 
-        connection.query('SELECT * FROM posts WHERE aid = ?', [aid], async (error, results, fields) => {
-            if(error) {
-                console.error('could not select.', error);
-                return res.status(500).json({msg: 'database error'});
-            }
-
-            // TODO: Iterate over array and call `post_delete` to delete each post.
-
-            for (let index = 0; index < results.length; index++) {
-                try {
-                    await post_delete(results[index].pid)
-                    console.log('post successfully deleted');
-                } catch (e) {
-                    console.log('unable to delete this post');
-                    console.log(e);
-                }                
-            }
-
-            // DELETE ACCOUNT
-            // DELETE FROM `accounts` WHERE `accounts`.`aid` = 5934622415
-
-            connection.query('DELETE FROM accounts WHERE aid = ?', [aid], (error, results, fields) => {
-                if(error) {
-                    console.error('could not delete.', error);
-                    return res.status(500).json({msg: 'database error'});
-                }
-
-                connection.release();
-                return res.status(200).send();
-            })
-
-
-        })
-    })
+        await db.query('DELETE FROM accounts WHERE aid = ?', [aid]);
+        return res.status(200).send();
+    } catch (error) {
+        env.isDev() && console.log(error);
+    }
 
 })
 

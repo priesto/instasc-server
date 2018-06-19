@@ -22,12 +22,16 @@ const put = (filebuffer, cb) => {
 
     let content_type;
     let filename;
+    let ext;
 
     mediaUtils.isJPEG(filebuffer.toString('hex', 0, 3)) ? content_type = 'image/jpeg' : null;
-    //mediaUtils.isPNG(filebuffer.toString('hex', 0, 4)) ? content_type = 'image/png' : null;
+    mediaUtils.isGIF(filebuffer.toString('hex', 0, 4)) ? content_type = 'image/gif' : null;
+    mediaUtils.isPNG(filebuffer.toString('hex', 0, 4)) ? content_type = 'image/png' : null;
 
-    if(!content_type) cb('not an image file');
-    filename = crypto.randomBytes(10).toString('hex') + '_' + Date.now() + '.jpeg'
+    if(!content_type) cb('unsupported file type');
+
+    ext = content_type.split('/')[1];
+    filename = crypto.randomBytes(10).toString('hex') + '_' + Date.now() + '.' + ext;
     
     s3.putObject({
         ACL: 'public-read',

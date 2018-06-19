@@ -2,6 +2,7 @@
     "require": {
         "mgp25/instagram-php": "^4.1",
         "predis/predis": "^1.1",
-        "superbalist/php-pubsub-redis": "^2.0"
+        "superbalist/php-pubsub-redis": "^2.0",
+        "aws/aws-sdk-php": "^3.61"
     }
 }

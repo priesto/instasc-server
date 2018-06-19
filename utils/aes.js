@@ -22,6 +22,10 @@ function decrypt(text) {
   let textParts = text.split(':');
   let iv = new Buffer(textParts.shift(), 'hex');
   let encryptedText = new Buffer(textParts.join(':'), 'hex');
+
+  console.log(iv.toString('hex'));
+  console.log(encryptedText.toString('hex'));
+
   let decipher = crypto.createDecipheriv('aes-256-cbc', new Buffer(ENCRYPTION_KEY), iv);
   let decrypted = decipher.update(encryptedText);
 
