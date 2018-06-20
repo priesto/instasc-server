@@ -54,7 +54,7 @@ router.post('/', (req, res) => {
 
             const obj = JSON.parse(message);
             const cipher = aes.encrypt(password);
-
+            
             await db.query(`
                 INSERT INTO accounts (aid, ig_username, ig_password, ig_img, proxy, uid)
                 VALUES (?, ?, ?, ?, ?, ?)`,

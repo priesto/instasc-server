@@ -18,7 +18,7 @@ router.post('/login', async (req, res) => {
     if(!isEmail(email)) return res.status(401).json({msg: 'not an email'});
 
     try {
-        const results = await db.query('SELECT uid, password FROM users WHERE email = ?', [email])
+        const results = await db.query('SELECT uid, password, end_of_service FROM users WHERE email = ?', [email])
 
         // results: [{uid, password}]
         if(results.length === 0) return res.status(401).json({msg: 'user does not exist'});
@@ -26,12 +26,13 @@ router.post('/login', async (req, res) => {
 
         let uid = results[0].uid;
         let hash = results[0].password;
+        let endOfService = results[0].end_of_service;
 
         bcrypt.compare(password, hash, function(err, result) {
             if(!result) return res.status(401).json({msg: 'wrong credentials'});
             jwt.sign({uid: uid}, JWT_SECRET, { expiresIn: '3h'}, (err, token) => {
                 if(err) return res.status(500).json({msg: 'could not generate a token'});
-                res.status(200).json({msg: 'you are now connected', token});
+                res.status(200).json({msg: 'you are now connected', token, endOfService});
             })
         });
 
@@ -63,10 +64,14 @@ router.post('/signup', (req, res) => {
 
 
             try {
-                await db.query('INSERT INTO users (email, password, username) VALUES (?, ?, ?)', [email, hash, username]);
+                let endOfService = new Date();
+
+                endOfService = endOfService.setDate(endOfService.getDate() + 3);
+
+                await db.query('INSERT INTO users (email, password, username, end_of_service) VALUES (?, ?, ?, ?)', [email, hash, username, endOfService]);
                 
-                const results = await db.query('SELECT uid from users WHERE email = ?', [email]);
-                const { uid } = results[0];
+                const results = await db.query('SELECT uid, end_of_service from users WHERE email = ?', [email]);
+                const { uid, end_of_service } = results[0];
 
                 jwt.sign({uid: uid}, JWT_SECRET, { expiresIn: '3h'}, (err, token) => {
                     if(err) {
@@ -74,7 +79,7 @@ router.post('/signup', (req, res) => {
                         return res.status(500).json({msg: 'could not generate a token'});
                     }
 
-                    res.status(201).json({msg: 'user created', token});
+                    res.status(201).json({msg: 'user created', token, endOfService: end_of_service});
                 });
 
             } catch (error) {

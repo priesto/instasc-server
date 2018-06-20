@@ -75,3 +75,5 @@ vendor
 dump.rdb
 
 redis-4.0.9
+
+ssl
