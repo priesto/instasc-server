@@ -8,6 +8,7 @@ const atrm = require('../utils/atrm');
 const env = require('../utils/env');
 const post_delete = require('../utils/post_delete');
 
+const Exception = require('../utils/exception');
 
 const router = express.Router();
 const storage = multer.memoryStorage();
@@ -17,6 +18,12 @@ const upload = multer({
     limits: {
         fileSize: 1 * Math.pow(10,6),
         files: 1
+    },
+    fileFilter: function(req, file, cb) {
+        const valid = file.mimetype === 'image/jpeg' || file.mimetype === 'image/png' || file.mimetype === 'image/gif';
+        
+        if(valid) cb(null, valid);
+        else cb(new Error('Not a valid file'), valid);
     }
 }).single('img');
 
@@ -25,7 +32,7 @@ const upload = multer({
 // TODO: Write `upload` script.
 
 
-router.get('/', async (req, res) => {
+router.get('/', async (req, res, next) => {
     const { uid } = req.token;
 
     // TODO: check if aid belongs to this user.
@@ -36,44 +43,59 @@ router.get('/', async (req, res) => {
         return res.status(200).json(results);
 
     } catch (error) {
-        
-        env.isDev() && console.log(error);
-        return res.status(500).send();
+        return next(new Exception('Database Error', error.message, {uid}, 500));
     }
 
 })
 
-router.post('/', (req, res) => {
+router.post('/', (req, res, next) => {
     
     //TODO: Revert previous operations if something bad happens during the process.
 
 
 
 
-    upload(req, res, (err) => {
+    upload(req, res, async (err) => {
         
         // req.body contains non-file data
         // req.file contain information about the file.
-        
+
+        if(err)
+            return next(new Exception('Upload Error', err.message, {file:req.file}, 400));
+
         let { caption, timestamp, aid } = req.body;
-        
-        if(!caption || !timestamp || !req.file || !aid) return res.status(400).json({msg: 'some fields are missing'});
+
+        if(!caption || !timestamp || !req.file || !aid)
+            return next(new Exception('Missing fields', null, {caption, timestamp, aid, file:req.file}, 400));
         
         try { timestamp = parseInt(timestamp); }
         catch(e) {
-            env.isDev() && console.log(e);
-            return res.status(500).send();
+            return next(new Exception('Invalid timestamp', e.message, {timestamp}, 400));
         }
 
-        if(err) {
-            env.isDev() && console.log(err);
-            return res.status(500).send();
+
+        // Check if timestamp between endOfService and a valid date
+
+        try {
+            const results = await db.query('SELECT end_of_service from users WHERE uid = ?', [req.token.uid]);
+            
+            const endOfService = results[0].end_of_service;
+            const now = new Date().getTime();
+
+            const valid = timestamp >= now && timestamp <= parseInt(endOfService);
+
+            if(!valid)
+                return next(new Exception('Unauthorized timestamp', null, {timestamp, endOfService}, 400));
+            
+        } catch (error) {
+            return next(new Exception('Database Error', error.message, {uid: req.token.uid}, 500));
         }
 
         aws.put(req.file.buffer, async (err, url) => {
             if(err) {
-                env.isDev() && console.log(err);
-                return res.status(500).send();
+                // err is an instance of Error
+                let error = err.message || err;
+                return next(new Exception('AWSError', error.message, null, 500));
             }
 
             try {
@@ -94,8 +116,8 @@ router.post('/', (req, res) => {
                 at(`${hours}:${minutes} ${month}/${dayMonth}/${year}`, pid, async (err, jobid) => {
 
                     if(err) {
-                        env.isDev() && console.log(err);
-                        return res.status(500).send();
+                        // err is an instance of Error
+                        return next(new Exception('AT Error', err.message, {hours, minutes, month, dayMonth, year, pid}, 500));
                     }
 
                     try {
@@ -104,15 +126,13 @@ router.post('/', (req, res) => {
 
                         return res.status(201).send(results);
                     } catch (error) {
-                        env.isDev() && console.log(error);
-                        return res.status(500).send();
+                        return next(new Exception('Database Error', error.message, {jobid, pid}, 500));
                     }
 
                 });
 
             } catch (error) {
-                env.isDev() && console.log(error);
-                return res.status(500).send();
+                return next(new Exception('Database Error or Timestamp Invalid', error.message, {timestamp, caption, url, aid}, 500));
             }
 
 
@@ -122,8 +142,9 @@ router.post('/', (req, res) => {
 
 })
 
-router.delete('/:pid', (req, res) => {
-    if(!req.params.pid) return res.status(400).json({msg: 'missing id'});
+router.delete('/:pid', (req, res, next) => {
+    if(!req.params.pid)
+        return next(new Exception('Pid is missing', null, {params: req.params}, 400));
 
     const { pid } = req.params;
 
@@ -134,8 +155,9 @@ router.delete('/:pid', (req, res) => {
     post_delete(pid)
         .then(() => res.status(200).send())
         .catch((err) => {
-            console.log(err);
-            return res.status(500).json(err);
+            if(process.env.NODE_ENV === 'development')
+                console.log(err);
+            return next(new Exception('Could not delete this post', err.message, {pid}, 500));
         })
 
 })

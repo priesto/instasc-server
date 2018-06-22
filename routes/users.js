@@ -9,58 +9,62 @@ const { JWT_SECRET } = require('../config');
 const db = require('../utils/database');
 const env = require('../utils/env');
 
+const Exception = require('../utils/exception');
+
 const router = express.Router();
 
-router.post('/login', async (req, res) => {
+router.post('/login', async (req, res, next) => {
     const { email, password } = req.body;
 
-    if(isEmpty(email) || isEmpty(password)) return res.status(400).json({msg: 'you must provide credentials'});
-    if(!isEmail(email)) return res.status(401).json({msg: 'not an email'});
+    if(isEmpty(email) || isEmpty(password) || !isEmail(email))
+        return next(new Exception('Invalid email or missing credentials', null, {email, password}, 400));
 
     try {
         const results = await db.query('SELECT uid, password, end_of_service FROM users WHERE email = ?', [email])
 
         // results: [{uid, password}]
-        if(results.length === 0) return res.status(401).json({msg: 'user does not exist'});
-        if(results.length > 1) return res.status(500).json({msg: 'an error occured'});
+
+        if(results.length === 0)
+            return next(new Exception('Could not find this user', null, {email, password}, 400));
+
+        if(results.length > 1)
+            return next(new Exception('Multiple users with same email', null, {email}, 500));
 
         let uid = results[0].uid;
         let hash = results[0].password;
         let endOfService = results[0].end_of_service;
 
         bcrypt.compare(password, hash, function(err, result) {
-            if(!result) return res.status(401).json({msg: 'wrong credentials'});
+            if(!result) return next(new Exception('Invalid credentials', null, {email, password}, 400));
+
             jwt.sign({uid: uid}, JWT_SECRET, { expiresIn: '3h'}, (err, token) => {
-                if(err) return res.status(500).json({msg: 'could not generate a token'});
+                if(err) return next(new Exception('Could not generate a token', err, null, 500));
                 res.status(200).json({msg: 'you are now connected', token, endOfService});
             })
+
         });
 
     } catch (error) {
-        env.isDev() && console.log(error);
-        return res.status(500).json({msg: 'database error'});
+        let ex = new Exception('Database error', error.message, null, 500);
+        return next(ex);
     }
 
 })
 
-router.post('/signup', (req, res) => {
+router.post('/signup', (req, res, next) => {
     const { email, password, username } = req.body;
 
-    if(isEmpty(email) || isEmpty(password) || isEmpty(username)) return res.status(400).json({msg: 'you must provide credentials'});
-    if(!isEmail(email)) return res.status(400).json({msg: 'not an email'});
-
+    if(isEmpty(email) || isEmpty(password) || isEmpty(username) || !isEmail(email))
+        return next(new Exception('Invalid email or missing credentials', null, {email, password, username}, 400));
+    
     bcrypt.genSalt(10, function(err, salt) {
-        if(err) {
-            env.isDev() && console.log('bcrypt error:', err);
-            return res.status(500).json({msg: 'bcrypt error'});
-        }
+        if(err)
+            return next(new Exception('Bcrypt genSalt Error', err.message, null, 500));
 
         //TODO: Sanitize inputs.
         bcrypt.hash(password, salt, async function(err, hash) {
-            if(err) {
-                env.isDev() && console.log(err);
-                return res.status(500).json({msg: 'hash error', err});
-            }
+            if(err)
+                return next(new Exception('Bcrypt Hash Error', err.message, null, 500));
 
 
             try {
@@ -74,17 +78,14 @@ router.post('/signup', (req, res) => {
                 const { uid, end_of_service } = results[0];
 
                 jwt.sign({uid: uid}, JWT_SECRET, { expiresIn: '3h'}, (err, token) => {
-                    if(err) {
-                        env.isDev() && console.log(err);
-                        return res.status(500).json({msg: 'could not generate a token'});
-                    }
+                    if(err)
+                        return next(new Exception('JWT Sign Error', err.message, null, 500));
 
                     res.status(201).json({msg: 'user created', token, endOfService: end_of_service});
                 });
 
             } catch (error) {
-                env.isDev() && console.log(error);
-                return res.status(500).send();
+                return next(new Exception('Unxpected Error', error.message, null, 500));
             }
 
         });

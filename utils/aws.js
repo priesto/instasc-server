@@ -28,7 +28,7 @@ const put = (filebuffer, cb) => {
     mediaUtils.isGIF(filebuffer.toString('hex', 0, 4)) ? content_type = 'image/gif' : null;
     mediaUtils.isPNG(filebuffer.toString('hex', 0, 4)) ? content_type = 'image/png' : null;
 
-    if(!content_type) cb('unsupported file type');
+    if(!content_type) cb(new Error('Unsupported file type'));
 
     ext = content_type.split('/')[1];
     filename = crypto.randomBytes(10).toString('hex') + '_' + Date.now() + '.' + ext;

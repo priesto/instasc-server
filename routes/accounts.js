@@ -7,26 +7,38 @@ const aes = require('../utils/aes');
 const env = require('../utils/env');
 const post_delete = require('../utils/post_delete');
 
+const Exception = require('../utils/exception');
+
 const router = express.Router();
 
-router.get('/', async (req, res) => {
+router.get('/', async (req, res, next) => {
     let { uid } = req.token;
 
     try {
         const results = await db.query('SELECT aid, ig_username, ig_img, proxy, uid FROM accounts WHERE uid = ?', [uid]);
         res.status(200).json(results);
     } catch (error) {
-        env.isDev() && console.log(error);
-        return res.status(500).send();
+        return next(new Exception('Database Error', error.message, {uid}, 500));
     }
 
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res, next) => {
     let { username, password, proxy } = req.body;
 
-    if(!username || !password) return res.status(401).json({msg: 'some fields are missing'});
+    if(!username || !password)
+        return next(new Exception('Missing fields', null, {username, password, proxy}, 400));
+
     if(!proxy) proxy = null;
+
+    // Check if username not already added by someone else
+
+    try {
+        const results = await db.query('SELECT aid from accounts WHERE username = ?', [username]);
+        if(results.length !== 0) return res.status(400).send();
+    } catch (error) {
+        return next(new Exception('Database Error', error.message, {uid}, 500));
+    }
 
     const publisher = redis.createClient();
     const subscriber = redis.createClient();
@@ -68,13 +80,11 @@ router.post('/', (req, res) => {
 
             return res.status(201).send(results);
             
-        } catch (error) {
-            env.isDev() && console.log(error);
-            
+        } catch (error) {            
             publisher.quit();
             subscriber.quit();
 
-            return res.status(500).send();
+            return next(new Exception('Unknown Error', error.message, {message, username, password, proxy}, 500));
         }
 
     })
@@ -88,12 +98,14 @@ router.post('/', (req, res) => {
     
 })
 
-router.put('/', async (req, res) => {
+router.put('/', async (req, res, next) => {
     const { newPassword, newProxy, aid } = req.body;
 
-    if(!newPassword && !newProxy) return res.status(400).json({msg: 'some fields are missing'});
-    if(!aid) return res.status(400).json({msg: 'aid is missing'});
-    // UPDATE `accounts` SET `ig_password` = 'dddd', `proxy` = 'ddd' WHERE `accounts`.`aid` = 5934622415
+    if(!newPassword && !newProxy) 
+        return next(new Exception('Missing fields', null, {newPassword, newProxy, aid}, 400));
+
+    if(!aid)
+        return next(new Exception('Aid is missing', null, {aid, newPassword, newProxy}, 400));
 
     let sql;
 
@@ -115,20 +127,20 @@ router.put('/', async (req, res) => {
         return res.status(200).send();
 
     } catch (error) {
-        env.isDev() && console.log(error);
-        return res.status(500).send();
+        return next(new Exception('Database Error', error.message, {sql}, 500));
     }
 
 })
 
 
-router.delete('/:aid', async (req,res) => {
+router.delete('/:aid', async (req,res, next) => {
     // 1. Supprimer tous les posts appartenant à cette utilisateur.
     // 2. Supprimer ce compte.
 
     const { aid } = req.params;
 
-    if(!aid) return res.status(400).json({msg: 'aid is missing'});
+    if(!aid)
+        return next(new Exception('Aid is missing', null, {aid}, 400));    
 
     // Créer boucle et supprimer tous les posts en utilisant
     // 'delete endpoint' de la route users.
@@ -140,9 +152,11 @@ router.delete('/:aid', async (req,res) => {
         for (let index = 0; index < results.length; index++) {
             try {
                 await post_delete(results[index].pid)
-                console.log('post successfully deleted');
             } catch (e) {
-                console.log('unable to delete this post');
+                // Figure what to do if an error occurs with the deletion of a post.
+                // Stop everything? Continue?
+
+                console.log('could not delete this post');
                 console.log(e);
             }             
         }
@@ -150,7 +164,7 @@ router.delete('/:aid', async (req,res) => {
         await db.query('DELETE FROM accounts WHERE aid = ?', [aid]);
         return res.status(200).send();
     } catch (error) {
-        env.isDev() && console.log(error);
+        return next(new Exception('Database Error', error.message, {aid}, 500));
     }
 
 })
