@@ -36,9 +36,10 @@ module.exports = (pid) => {
                             })
                         }
                     }
-        
-                    return resolve();
                 }
+
+                return resolve();
+                
             })
         
         })
