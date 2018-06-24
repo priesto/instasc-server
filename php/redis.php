@@ -46,7 +46,8 @@ $subscriber->subscribe("request", function ($message) use($publisher, $ig) {
     
             $json = array(
                 "id" => $user_id,
-                "img" => $profile_pic
+                "img" => $profile_pic,
+                "new_session" => true
             );
     
             $publisher->publish("response", json_encode($json));
@@ -58,7 +59,20 @@ $subscriber->subscribe("request", function ($message) use($publisher, $ig) {
             // A session already exists for this user, thus `$res` is null.
             // TODO: Figure out what to do in this case, for the moment we simply respond a 403 code.
     
-            $publisher->publish("response", 403);
+            // TODO: Retrieve id and img_url
+            // $ig->account->getCurrentUser(); // UserInfoResponse->getUser() // Model\User->getHdProfilePicUrlInfo
+            // ImageCandidate->getUrl()
+
+            $user_id = $ig->account_id;
+            $profile_pic = $ig->account->getCurrentUser()->getUser()->getHdProfilePicUrlInfo()->getUrl(); 
+
+            $json = array(
+                "id" => $user_id,
+                "img" => $profile_pic,
+                "new_session" => false
+            );
+
+            $publisher->publish("response", json_encode($json));
             
         }
 
@@ -67,7 +81,18 @@ $subscriber->subscribe("request", function ($message) use($publisher, $ig) {
         // An error occured during the login process.
         // Let's log everything and inform Node.js
         syslog(LOG_ERR, "Something went wrong: " . $e->getMessage() . "\n");
-        $publisher->publish("response", 401);
+
+        $json = array(
+            "err" => $e->getMessage()
+        );
+
+        if($e instanceof \InstagramAPI\Exception\IncorrectPasswordException)
+            $json["code"] = 401;
+        else
+            $json["code"] = 500;
+
+
+        $publisher->publish("response", json_encode($json));
         
     }
 

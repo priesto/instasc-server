@@ -34,10 +34,11 @@ router.post('/', async (req, res, next) => {
     // Check if username not already added by someone else
 
     try {
-        const results = await db.query('SELECT aid from accounts WHERE username = ?', [username]);
-        if(results.length !== 0) return res.status(400).send();
+        const results = await db.query('SELECT aid from accounts WHERE ig_username = ?', [username]);
+        if(results.length !== 0)
+            return next(new Exception('Account already added by someone else', null, {username, password, proxy}, 400));
     } catch (error) {
-        return next(new Exception('Database Error', error.message, {uid}, 500));
+        return next(new Exception('Database Error', error.message, {uid:req.token.uid, username, password, proxy}, 500));
     }
 
     const publisher = redis.createClient();
@@ -45,26 +46,39 @@ router.post('/', async (req, res, next) => {
 
     const json = { username, password };
 
+    let obj;
+
     subscriber.on('message', async (channel, message) => {
-        if(message === '401' | message === '403') {
-
-            // An error occured during the connection or a session already exists.
-            publisher.quit();
-            subscriber.quit();
-
-            return res.status(message).send();
-        }
 
         try {
-
             // Predis seems to escape some characters such as double quotes, and on top of that
             // double quotes are added at the beginning and the end of the JSON string.
             // So, for the moment we simply use `replace` and `slice` to delete those extra chars.
             // TODO: Find a solution.
 
             message = message.replace(/\\/g, '').slice(0, -1).slice(1);
+            obj = JSON.parse(message);
 
-            const obj = JSON.parse(message);
+        } catch (error) {
+            return next(new Exception('Could not parse message', error.message, {message}, 500));
+        }
+
+
+        if(obj.err) {
+
+            publisher.quit();
+            subscriber.quit();
+
+            if(obj.code == 401) {
+                return next(new Exception('Invalid proxy or credentials', obj.err, {username, password, proxy}, 401));
+            }
+
+            return next(new Exception('An unknown error occured', obj.err, {username, password, proxy}, 500));
+        }
+
+
+        try {
+
             const cipher = aes.encrypt(password);
             
             await db.query(`
@@ -83,10 +97,9 @@ router.post('/', async (req, res, next) => {
         } catch (error) {            
             publisher.quit();
             subscriber.quit();
-
-            return next(new Exception('Unknown Error', error.message, {message, username, password, proxy}, 500));
+            return next(new Exception('Database Error', error.message, {message, username, password, proxy}, 500));
         }
-
+        
     })
     
     subscriber.on('subscribe', (channel, count) => {
@@ -162,6 +175,9 @@ router.delete('/:aid', async (req,res, next) => {
         }
 
         await db.query('DELETE FROM accounts WHERE aid = ?', [aid]);
+
+        // TODO: Log out using PHP script.
+        
         return res.status(200).send();
     } catch (error) {
         return next(new Exception('Database Error', error.message, {aid}, 500));
