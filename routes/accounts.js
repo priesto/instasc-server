@@ -44,7 +44,7 @@ router.post('/', async (req, res, next) => {
     const publisher = redis.createClient();
     const subscriber = redis.createClient();
 
-    const json = { username, password };
+    const json = { username, password, proxy };
 
     let obj;
 
@@ -123,6 +123,8 @@ router.put('/', async (req, res, next) => {
     let sql;
 
     // TODO: Sanitize user input.
+
+    // TODO: Proxy is only verified on client side right now, check it aswell server side.
 
     if(newPassword) {
         const cipher = aes.encrypt(newPassword);

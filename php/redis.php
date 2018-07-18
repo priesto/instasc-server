@@ -31,10 +31,11 @@ $subscriber->subscribe("request", function ($message) use($publisher, $ig) {
 
     $username = $message['username'];
     $password = $message['password'];
+    $proxy = $message['proxy'];
+    
+    if($proxy) $ig->setProxy($proxy);
 
     try {
-
-        //TODO: What if a user want to use a proxy?
 
         $res = $ig->login($username, $password);
 
